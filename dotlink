@@ -1,0 +1,153 @@
+#!/usr/bin/env python
+import os
+import sys
+import argparse
+import fnmatch
+from functools import partial
+
+def dry_symlink(src, target):
+    if os.path.exists(target):
+        print(f"{target} already exists")
+        return
+
+    rel_src = os.path.relpath(src, os.path.dirname(target))
+    print(f'Linking {rel_src} -> {target}')
+
+
+def dry_remove(src, target):
+    if os.path.exists(target):
+        if os.path.islink(target):
+            if os.path.realpath(target) == os.path.realpath(src):
+                print(f'Removing {src} -> {target}')
+            else:
+                print(f'{target} is not a symlink to {src}')
+        else:
+            print(f'{target} is not a symlink')
+
+
+def dry_run(src):
+    print(f'Execute: {src}')
+
+
+def my_symlink(src, target):
+    if os.path.exists(target):
+        raise Exception('Target already exists: %s' % target)
+
+    if os.path.dirname(target) != target:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+
+    rel_src = os.path.relpath(src, os.path.dirname(target))
+    os.symlink(rel_src, target)
+
+
+def my_remove(src, target):
+    if os.path.exists(target):
+        if os.path.islink(target):
+            if os.path.realpath(target) == os.path.realpath(src):
+                os.remove(target)
+            else:
+                raise Exception('Target is not a symlink to %s' % src)
+        else:
+            raise Exception('Target is not a symlink: %s' % target)
+
+
+def force_remove(src, target):
+    _ = src
+    if os.path.exists(target):
+        os.remove(target)
+
+
+def my_run(src):
+    os.system(src)
+
+
+def perform_relink(src, target, symlink_func, remove_func):
+    if os.path.exists(target):
+        remove_func(src, target)
+    symlink_func(src, target)
+
+
+def make_link(src, target, ignores, action_func, run_func=None, depth=0):
+    if not os.path.exists(src):
+        raise Exception(f'Source does not exist: {src}')
+
+    if os.path.isfile(src):
+        if os.path.basename(src) == "install.sh":
+            if run_func and os.access(src, os.X_OK) and depth == 1:
+                run_func(src)
+        else:
+            action_func(src, target)
+    elif os.path.islink(src):
+        action_func(src, target)
+    elif os.path.isdir(src):
+        for x in os.listdir(src):
+            if not any(fnmatch.fnmatch(x, ignore) for ignore in ignores):
+                if x.startswith('dot-'):
+                    target_x = x.replace('dot-', '.', 1)
+                elif x.startswith('_'):
+                    target_x = x.replace('_', '.', 1)
+                else:
+                    target_x = x
+                make_link(os.path.join(src, x), os.path.join(target, target_x), ignores, action_func, run_func, depth + 1)
+    else:
+        raise Exception('Unknown file type: %s' % src)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Create dotfiles symlink to from directories', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-d', '--unlink', dest='unlink', action='store_true', default=False, help='unlink')
+    group.add_argument('-r', '--relink', dest='relink', action='store_true', default=False, help='relink')
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--dry-run', dest='dry_run', action='store_true', default=False, help='dry run')
+    group.add_argument('--force', dest='force', action='store_true', default=False, help='force link, if target exists delete it first')
+
+    parser.add_argument('--ignore', dest='ignore', action='append', default=["README.*", "IGNORED"], help='ignore files matching this pattern')
+    parser.add_argument('-i', '--install', dest='install', action='store_true', default=False, help='run install.sh script in toplevel directory')
+
+    parser.add_argument('-t', '--target', dest='target', default=os.getenv('HOME'), help='target directory')
+
+    parser.add_argument("dirs", metavar="dir", type=str, nargs='+', help="src to link")
+
+    args = parser.parse_args()
+
+    target = args.target
+    if target is None:
+        print('No target directory specified')
+        sys.exit(1)
+
+    action_func = None
+    run_func = None
+
+    if args.unlink:
+        action_func = my_remove
+        if args.dry_run:
+            action_func = dry_remove
+        if args.force:
+            action_func = force_remove
+    elif args.relink:
+        action_func = partial(perform_relink, symlink_func=my_symlink, remove_func=my_remove)
+        if args.dry_run:
+            action_func = partial(perform_relink, symlink_func=dry_symlink, remove_func=dry_remove)
+        if args.force:
+            action_func = partial(perform_relink, symlink_func=my_symlink, remove_func=force_remove)
+    else:
+        action_func = my_symlink
+        run_func = my_run
+        if args.dry_run:
+            action_func = dry_symlink
+        if args.force:
+            action_func = partial(perform_relink, symlink_func=my_symlink, remove_func=force_remove)
+        if args.install:
+            run_func = my_run
+            if args.dry_run:
+                run_func = dry_run
+
+    for dir in args.dirs:
+        make_link(dir, target, args.ignore, action_func, run_func)
+
+
+if __name__ == '__main__':
+    main()
