@@ -72,14 +72,14 @@ def make_link(src, target, ignores, action_func, run_func=None, depth=0):
     names = os.listdir(src)
 
     if depth == 0:
-        if 'prelink' in names:
-            names.remove('prelink')
-        if 'postlink' in names:
-            names.remove('postlink')
+        if 'pre-link-hook.sh' in names:
+            names.remove('pre-link-hook.sh')
+        if 'post-link-hook.sh' in names:
+            names.remove('post-link-hook.sh')
         if run_func:
-            prelink = os.path.join(src, 'prelink')
+            prelink = os.path.join(src, 'pre-link-hook.sh')
             if os.path.isfile(prelink) and os.access(prelink, os.X_OK):
-                run_func(f'cd {src} && ./prelink')
+                run_func(f'cd {src} && ./prelink-hook.sh')
                 
     for name in names:
         filename = os.path.join(src, name)
@@ -103,9 +103,9 @@ def make_link(src, target, ignores, action_func, run_func=None, depth=0):
             raise Exception(f'{filename} is not a file or directory')
 
     if depth == 0 and run_func:
-        postlink = os.path.join(src, 'postlink')
+        postlink = os.path.join(src, 'post-link-hook.sh')
         if os.path.isfile(postlink) and os.access(postlink, os.X_OK):
-            run_func(f'cd {src} && ./postlink')
+            run_func(f'cd {src} && ./post-link-hook.sh')
 
 
 def main():
@@ -120,7 +120,7 @@ def main():
     group.add_argument('--force', dest='force', action='store_true', default=False, help='force link, if target exists delete it first')
 
     parser.add_argument('--ignore', dest='ignore', action='append', default=["README.*", "IGNORED", ".DS_Store"], help='ignore files matching this pattern')
-    parser.add_argument('-s', '--run-scripts', dest='scripts', action='store_true', default=False, help='run "prelink" and "postlink" scripts in toplevel directory')
+    parser.add_argument('--run-hooks', dest='hooks', action='store_true', default=False, help='run "pre-link-hook.sh" and "post-link-hook.sh" scripts in toplevel directory')
 
     parser.add_argument('-t', '--target', dest='target', default=os.getenv('HOME'), help='target directory')
 
@@ -155,7 +155,7 @@ def main():
             action_func = dry_symlink
         if args.force:
             action_func = partial(perform_relink, symlink_func=my_symlink, remove_func=force_remove)
-        if args.scripts:
+        if args.hooks:
             run_func = my_run
             if args.dry_run:
                 run_func = dry_run
