@@ -66,29 +66,46 @@ def perform_relink(src, target, symlink_func, remove_func):
 
 
 def make_link(src, target, ignores, action_func, run_func=None, depth=0):
-    if not os.path.exists(src):
-        raise Exception(f'Source does not exist: {src}')
-    
-    if os.path.isfile(src):
-        if os.path.basename(src) == "install":
-            if run_func and os.access(src, os.X_OK) and depth == 1:
-                run_func(src)
+    if not os.path.isdir(src):
+        raise Exception(f'{src} is not a directory')
+
+    names = os.listdir(src)
+
+    if depth == 0:
+        if 'prelink' in names:
+            names.remove('prelink')
+        if 'postlink' in names:
+            names.remove('postlink')
+        if run_func:
+            prelink = os.path.join(src, 'prelink')
+            if os.path.isfile(prelink) and os.access(prelink, os.X_OK):
+                run_func(f'cd {src} && ./prelink')
+                
+    for name in names:
+        filename = os.path.join(src, name)
+
+        if name.startswith('dot-'):
+            targetname = name.replace('dot-', '.', 1)
+        elif name.startswith('_'):
+            targetname = name.replace('_', '.', 1)
         else:
-            action_func(src, target)
-    elif os.path.islink(src):
-        action_func(src, target)
-    elif os.path.isdir(src):
-        for x in os.listdir(src):
-            if not any(fnmatch.fnmatch(x, ignore) for ignore in ignores):
-                if x.startswith('dot-'):
-                    target_x = x.replace('dot-', '.', 1)
-                elif x.startswith('_'):
-                    target_x = x.replace('_', '.', 1)
-                else:
-                    target_x = x
-                make_link(os.path.join(src, x), os.path.join(target, target_x), ignores, action_func, run_func, depth + 1)
-    else:
-        raise Exception('Unknown file type: %s' % src)
+            targetname = name
+
+        if os.path.isfile(filename) or os.path.islink(filename):
+            if any(fnmatch.fnmatch(name, ignore) for ignore in ignores):
+                continue
+            action_func(filename, os.path.join(target, targetname))
+        elif os.path.isdir(filename):
+            if any(fnmatch.fnmatch(name, ignore) for ignore in ignores):
+                continue
+            make_link(filename, os.path.join(target, targetname), ignores, action_func, run_func, depth+1)
+        else:
+            raise Exception(f'{filename} is not a file or directory')
+
+    if depth == 0 and run_func:
+        postlink = os.path.join(src, 'postlink')
+        if os.path.isfile(postlink) and os.access(postlink, os.X_OK):
+            run_func(f'cd {src} && ./postlink')
 
 
 def main():
@@ -103,7 +120,7 @@ def main():
     group.add_argument('--force', dest='force', action='store_true', default=False, help='force link, if target exists delete it first')
 
     parser.add_argument('--ignore', dest='ignore', action='append', default=["README.*", "IGNORED", ".DS_Store"], help='ignore files matching this pattern')
-    parser.add_argument('-i', '--install', dest='install', action='store_true', default=False, help='run install script in toplevel directory')
+    parser.add_argument('-s', '--run-scripts', dest='scripts', action='store_true', default=False, help='run "prelink" and "postlink" scripts in toplevel directory')
 
     parser.add_argument('-t', '--target', dest='target', default=os.getenv('HOME'), help='target directory')
 
@@ -138,7 +155,7 @@ def main():
             action_func = dry_symlink
         if args.force:
             action_func = partial(perform_relink, symlink_func=my_symlink, remove_func=force_remove)
-        if args.install:
+        if args.scripts:
             run_func = my_run
             if args.dry_run:
                 run_func = dry_run
