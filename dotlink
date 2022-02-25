@@ -79,7 +79,7 @@ def make_link(src, target, ignores, action_func, run_func=None, depth=0):
         if run_func:
             prelink = os.path.join(src, 'pre-link-hook.sh')
             if os.path.isfile(prelink) and os.access(prelink, os.X_OK):
-                run_func(f'cd {src} && ./prelink-hook.sh')
+                run_func(f'cd {src} && ./pre-link-hook.sh')
                 
     for name in names:
         filename = os.path.join(src, name)
@@ -150,7 +150,7 @@ def main():
             action_func = partial(perform_relink, symlink_func=my_symlink, remove_func=force_remove)
     else:
         action_func = my_symlink
-        run_func = my_run
+        run_func = None
         if args.dry_run:
             action_func = dry_symlink
         if args.force:
