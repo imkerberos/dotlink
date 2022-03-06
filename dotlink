@@ -4,6 +4,7 @@ import sys
 import platform
 import argparse
 import fnmatch
+import shutil
 from functools import partial
 
 def dry_symlink(src, target):
@@ -23,7 +24,7 @@ def dry_remove(src, target):
             else:
                 print(f'{target} is not a symlink to {src}')
         else:
-            print(f'{target} is not a symlink')
+            print(f'{target} is not a file or directory')
 
 
 def dry_run(src):
@@ -31,11 +32,14 @@ def dry_run(src):
 
 
 def my_symlink(src, target):
-    if os.path.exists(target):
-        raise Exception(f'Target already exists: {target}')
-
     if os.path.dirname(target) != target:
         os.makedirs(os.path.dirname(target), exist_ok=True)
+
+    if os.path.exists(target):
+        if os.path.realpath(target) != os.path.realpath(src):
+            raise Exception(f'Target already exists: {target}')
+        else:
+            return
 
     rel_src = os.path.relpath(src, os.path.dirname(target))
     os.symlink(rel_src, target)
@@ -53,8 +57,28 @@ def my_remove(src, target):
 
 
 def force_remove(src, target):
-    if os.path.isfile(target) or os.path.islink(target):
-        os.remove(target)
+    if os.path.exists(target):
+        if os.path.islink(target):
+            os.remove(target)
+        elif os.path.isfile(target):
+            if os.path.realpath(target) != os.path.realpath(src):
+                os.remove(target)
+            else:
+                raise Exception(f'{target} and {src} is in the same directory')
+        elif os.path.isdir(target):
+            if os.path.realpath(target) != os.path.realpath(src):
+                shutil.rmtree(target)
+            else :
+                raise Exception(f'{target} and {src} is in the same directory')
+        else:
+            raise Exception(f'{target} is not a file or directory')
+
+        return
+    else:
+        try:
+            os.remove(target)
+        except FileNotFoundError:
+            pass
 
 
 def my_run(src):
