@@ -3,23 +3,23 @@ import os
 import sys
 import platform
 import argparse
-import fnmatch
 import shutil
+import pathlib
 from functools import partial
 
 def dry_symlink(src, target):
-    if os.path.exists(target):
+    if target.exists():
         print(f'{target} already exists')
         return
 
-    rel_src = os.path.relpath(src, os.path.dirname(target))
+    rel_src = os.path.relpath(src, target.parent)
     print(f'Linking {rel_src} -> {target}')
 
 
 def dry_remove(src, target):
-    if os.path.exists(target):
-        if os.path.islink(target):
-            if os.path.realpath(target) == os.path.realpath(src):
+    if target.exists():
+        if target.is_symlink():
+            if target.samefile(src):
                 print(f'Removing {src} -> {target}')
             else:
                 print(f'{target} is not a symlink to {src}')
@@ -32,11 +32,11 @@ def dry_run(src):
 
 
 def my_symlink(src, target):
-    if os.path.dirname(target) != target:
-        os.makedirs(os.path.dirname(target), exist_ok=True)
+    if target.parent != target:
+        target.parent.mkdir(parents=True, exist_ok=True)
 
-    if os.path.exists(target):
-        if os.path.realpath(target) != os.path.realpath(src):
+    if target.exists():
+        if target.samefile(src):
             raise Exception(f'Target already exists: {target}')
         else:
             return
@@ -46,10 +46,10 @@ def my_symlink(src, target):
 
 
 def my_remove(src, target):
-    if os.path.exists(target):
-        if os.path.islink(target):
-            if os.path.realpath(target) == os.path.realpath(src):
-                os.remove(target)
+    if target.exists():
+        if target.is_symlink():
+            if target.samefile(src):
+                target.unlink()
             else:
                 raise Exception(f'Target is not a symlink to {src}')
         else:
@@ -57,19 +57,19 @@ def my_remove(src, target):
 
 
 def force_remove(src, target):
-    if os.path.exists(target):
-        if os.path.islink(target):
-            os.remove(target)
-        elif os.path.isfile(target):
-            if os.path.realpath(target) != os.path.realpath(src):
-                os.remove(target)
+    if target.exists():
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_file():
+            if not target.samefile(src):
+                target.unlink()
             else:
-                raise Exception(f'{target} and {src} is in the same directory')
-        elif os.path.isdir(target):
-            if os.path.realpath(target) != os.path.realpath(src):
+                raise Exception(f'{target} and {src} are in the same directory')
+        elif target.is_dir():
+            if not target.samefile(src):
                 shutil.rmtree(target)
-            else :
-                raise Exception(f'{target} and {src} is in the same directory')
+            else:
+                raise Exception(f'{target} and {src} are the same directory')
         else:
             raise Exception(f'{target} is not a file or directory')
 
@@ -91,18 +91,13 @@ def perform_relink(src, target, symlink_func, remove_func):
 
 
 def link_dir(src, target, ignores, action_func, run_func=None, depth=0):
-    if not os.path.isdir(src):
+    if not src.is_dir():
         raise Exception(f'{src} is not a directory')
 
-    names = os.listdir(src)
-
-    if depth == 0 and 'install.sh' in names:
-        names.remove('install.sh')
+    names = [x.name for x in src.iterdir() if not (depth == 0 and x == src / 'install.sh') \
+            and not any(x.match(ignore) for ignore in ignores)]
 
     for name in names:
-        if any(fnmatch.fnmatch(name, ignore) for ignore in ignores):
-            continue
-
         targetname = name
 
         dot_prefix = '.'
@@ -122,19 +117,19 @@ def link_dir(src, target, ignores, action_func, run_func=None, depth=0):
             else:
                 continue
 
-        filename = os.path.join(src, name)
+        entry = src / name
 
-        if os.path.isfile(filename) or os.path.islink(filename):
-            action_func(filename, os.path.join(target, targetname))
-        elif os.path.isdir(filename):
-            link_dir(filename, os.path.join(target, targetname), ignores, action_func, run_func, depth+1)
+        if entry.is_file() or entry.is_symlink():
+            action_func(entry, target / targetname)
+        elif entry.is_dir():
+            link_dir(entry, target / targetname, ignores, action_func, run_func, depth+1)
         else:
-            raise Exception(f'{filename} is not a file or directory')
+            raise Exception(f'{entry.name} is not a file or directory')
 
     if depth == 0 and run_func:
-        install = os.path.join(src, 'install.sh')
-        if os.path.isfile(install) and os.access(install, os.X_OK):
-            run_func(f'cd {src} && ./install.sh')
+        install = src / 'install.sh'
+        if install.is_file() and os.access(install, os.X_OK):
+            run_func(f'cd {src.name} && ./install.sh')
 
 
 def main():
@@ -189,7 +184,7 @@ def main():
                 run_func = dry_run
 
     for dir in args.dirs:
-        link_dir(dir, target, args.ignore, action_func, run_func)
+        link_dir(pathlib.Path(dir), pathlib.Path(target), args.ignore, action_func, run_func)
 
 
 if __name__ == '__main__':
