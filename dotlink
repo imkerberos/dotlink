@@ -94,7 +94,10 @@ def link_dir(src, target, ignores, action_func, run_func=None, depth=0):
     if not src.is_dir():
         raise Exception(f'{src} is not a directory')
 
-    names = [x.name for x in src.iterdir() if not (depth == 0 and x == src / 'install.sh') \
+    names = [x.name for x in src.iterdir() if not (depth == 0 and x in [src / 'install.sh',
+                                                                        src / 'install@darwin.sh',
+                                                                        src / 'install@linux.sh',
+                                                                        src / 'install@windows.sh']) \
             and not any(x.match(ignore) for ignore in ignores)]
 
     for name in names:
@@ -127,9 +130,10 @@ def link_dir(src, target, ignores, action_func, run_func=None, depth=0):
             raise Exception(f'{entry.name} is not a file or directory')
 
     if depth == 0 and run_func:
-        install = src / 'install.sh'
-        if install.is_file() and os.access(install, os.X_OK):
-            run_func(f'cd {src.name} && ./install.sh')
+        current_platform = platform.system().lower()
+        for install in [f'install@{current_platform}.sh', 'install.sh']:
+            if (src / install).is_file() and os.access(src / install, os.X_OK):
+                run_func(f'cd {src.name} && ./{install}')
 
 
 def main():
